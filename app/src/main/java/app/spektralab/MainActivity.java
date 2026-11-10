@@ -626,6 +626,12 @@ public class MainActivity extends Activity {
     private final List<String> edgeLabels = new ArrayList<>(), edgeIds = new ArrayList<>();
     private LinearLayout controls, panelHolder, filmCardStrip, brandRow, formatCardStrip;
     private HorizontalScrollView filmScroll, formatScroll;
+    // PAD-UI P0: 三栏骨架（左栏胶片、中间画布、右栏参数）。
+    private LinearLayout leftRail, rightRail;
+    private TextView railToggle;
+    private android.widget.ScrollView filmScrollV;
+    /** PAD-UI: 左栏两列网格的当前行；换行时新建一行。 */
+    private LinearLayout cardRow;
     /**
      * One photograph this session has opened, kept so the strip under the
      * canvas can bring it back without a trip through the picker.
@@ -1761,36 +1767,78 @@ public class MainActivity extends Activity {
         jobs.addView(exportProgressBar, new android.widget.FrameLayout.LayoutParams(-1, -1));
         stage.addView(jobs, new android.widget.FrameLayout.LayoutParams(-1, dp(2), android.view.Gravity.BOTTOM));
 
-        app.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
-        app.addView(buildSourceBar(), new LinearLayout.LayoutParams(-1, dp(62)));
+        // ---- PAD-UI P0: 三栏工作台 -----------------------------------------
+        // 左：胶片与相纸；中：画布 + 来源条；右：参数面板。
+        // 右栏可整体收起，收起后画布右缘留一个“参数”把手，点它恢复。
+        final LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackgroundColor(UI_PAPER);
+
+        leftRail = new LinearLayout(this);
+        leftRail.setOrientation(LinearLayout.VERTICAL);
+        leftRail.setBackgroundColor(UI_PAPER);
+        leftRail.setPadding(dp(10), dp(2), dp(10), 0);
+
+        final LinearLayout.LayoutParams leftLp =
+                new LinearLayout.LayoutParams(dp(252), -1);
+        leftLp.rightMargin = dp(1);
+        row.addView(leftRail, leftLp);
+
+        final LinearLayout center = new LinearLayout(this);
+        center.setOrientation(LinearLayout.VERTICAL);
+        center.setBackgroundColor(UI_STAGE);
+        center.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
+        center.addView(buildSourceBar(), new LinearLayout.LayoutParams(-1, dp(62)));
+        row.addView(center, new LinearLayout.LayoutParams(0, -1, 1f));
 
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setBackgroundColor(UI_PAPER);
+        rightRail = controls;
 
         panelHolder = new LinearLayout(this);
         panelHolder.setOrientation(LinearLayout.VERTICAL);
-        panelHolder.setPadding(dp(16), 0, dp(16), 0);
-        // Each panel states its own height. The optics page is 13 readouts
-        // behind one slider, so it needs 182 dp; the film shelf needs the
-        // full 240; the holder follows whichever is visible.
-        // Every panel is exactly as tall as what it shows. A fixed height
-        // left a blank sheet under the content on the short pages.
-        panelHolder.addView(buildFilmPanel(), new LinearLayout.LayoutParams(-1, -2));
+        panelHolder.setPadding(dp(14), 0, dp(14), dp(10));
+
+        // 胶片面板常驻左栏；其余五个面板在右栏由页签切换。
+        final View filmPanel = buildFilmPanel();
+        leftRail.addView(filmPanel, new LinearLayout.LayoutParams(-1, -1));
+        panels[0] = filmPanel;
+
         panelHolder.addView(buildOpticsPanel(), new LinearLayout.LayoutParams(-1, -2));
         panelHolder.addView(buildViewPanel(), new LinearLayout.LayoutParams(-1, -2));
         panelHolder.addView(buildFormatPanel(), new LinearLayout.LayoutParams(-1, -2));
         panelHolder.addView(buildComposePanel(), new LinearLayout.LayoutParams(-1, -2));
         panelHolder.addView(buildEdgePanel(), new LinearLayout.LayoutParams(-1, -2));
-        for (int i = 0; i < panels.length; ++i) panels[i] = panelHolder.getChildAt(i);
+        for (int i = 1; i < panels.length; ++i) panels[i] = panelHolder.getChildAt(i - 1);
 
-        controls.addView(panelHolder, new LinearLayout.LayoutParams(-1, -2));
-        controls.addView(buildTabs(), new LinearLayout.LayoutParams(-1, dp(58)));
-        app.addView(controls, new LinearLayout.LayoutParams(-1, -2));
+        final android.widget.ScrollView railScroll = new android.widget.ScrollView(this);
+        railScroll.setFillViewport(true);
+        railScroll.setVerticalScrollBarEnabled(false);
+        railScroll.addView(panelHolder, new android.widget.FrameLayout.LayoutParams(-1, -2));
+
+        controls.addView(buildTabs(), new LinearLayout.LayoutParams(-1, dp(44)));
+        controls.addView(railScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        row.addView(controls, new LinearLayout.LayoutParams(dp(304), -1));
+
+        app.addView(row, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        // 右栏收起后，画布右缘的“参数”把手。
+        railToggle = label("参数", 9, UI_INK, tfHan);
+        railToggle.setGravity(android.view.Gravity.CENTER);
+        railToggle.setBackgroundColor(UI_PAPER);
+        railToggle.setRotation(90f);
+        railToggle.setVisibility(View.GONE);
+        railToggle.setOnClickListener(v -> setPanelCollapsed(false));
+        final android.widget.FrameLayout.LayoutParams railLp =
+                new android.widget.FrameLayout.LayoutParams(dp(40), dp(56),
+                        android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.END);
+        railLp.rightMargin = dp(4);
+        stage.addView(railToggle, railLp);
 
         loadStockCatalog();
         refreshEdgeFormats();
-        setTab(0);
+        setTab(1);
         setPanelCollapsed(false);
         refreshPanelLocks();
         rebuildFrameChips();
@@ -3207,7 +3255,15 @@ public class MainActivity extends Activity {
     private View buildFilmPanel() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        final LinearLayout filmHead = sectionHead("FILM & PAPER / 胶片与相纸", this::resetFilmPanel);
+        final LinearLayout filmHead = new LinearLayout(this);
+        filmHead.setOrientation(LinearLayout.VERTICAL);
+        // PAD-UI P1: 左栏只有 252dp，标题、测光、重置挤在一行会溢出。
+        // 改成两行：标题 + 重置；测光单独一行。
+        final LinearLayout titleRow = sectionHead("FILM & PAPER / 胶片与相纸", this::resetFilmPanel);
+        filmHead.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(30)));
+        final LinearLayout meterRow = new LinearLayout(this);
+        meterRow.setOrientation(LinearLayout.HORIZONTAL);
+        meterRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
         // **The "As Shot" switch, where the original app puts the same choice.**
         // On: the meter decides the film exposure. Off: the frame keeps the
         // exposure the camera recorded, which is the only way a lamp in a dark
@@ -3224,12 +3280,12 @@ public class MainActivity extends Activity {
         meterChip.setOnClickListener(v -> showMeterPicker());
         final LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(-2, -2);
         labelLp.rightMargin = dp(6);
-        filmHead.addView(meterLabel, 1, labelLp);
+        meterRow.addView(meterLabel, labelLp);
         final LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
-        chipLp.rightMargin = dp(10);
-        filmHead.addView(meterChip, 2, chipLp);
+        meterRow.addView(meterChip, chipLp);
+        filmHead.addView(meterRow, new LinearLayout.LayoutParams(-1, dp(32)));
         refreshMeterChip();
-        panel.addView(filmHead, new LinearLayout.LayoutParams(-1, dp(38)));
+        panel.addView(filmHead, new LinearLayout.LayoutParams(-1, dp(64)));
 
         HorizontalScrollView brandScroll = new HorizontalScrollView(this);
         brandScroll.setHorizontalScrollBarEnabled(false);
@@ -3240,16 +3296,18 @@ public class MainActivity extends Activity {
         brandScroll.addView(brandRow, new android.widget.FrameLayout.LayoutParams(-2, dp(38)));
         panel.addView(brandScroll, new LinearLayout.LayoutParams(-1, dp(38)));
 
-        filmScroll = new HorizontalScrollView(this);
-        filmScroll.setHorizontalScrollBarEnabled(false);
-        filmScroll.setClipToPadding(false);
-        filmScroll.setFillViewport(false);
+        // PAD-UI P0: 左栏是纵向列表，胶片卡片改为整行宽，不再横向滑动。
+        filmScroll = null;
+        filmScrollV = new android.widget.ScrollView(this);
+        filmScrollV.setVerticalScrollBarEnabled(false);
+        filmScrollV.setClipToPadding(false);
+        filmScrollV.setFillViewport(true);
         filmCardStrip = new LinearLayout(this);
-        filmCardStrip.setOrientation(LinearLayout.HORIZONTAL);
+        filmCardStrip.setOrientation(LinearLayout.VERTICAL);
         filmCardStrip.setGravity(android.view.Gravity.TOP);
-        filmCardStrip.setPadding(0, dp(9), 0, dp(8));
-        filmScroll.addView(filmCardStrip, new android.widget.FrameLayout.LayoutParams(-2, -1));
-        panel.addView(filmScroll, new LinearLayout.LayoutParams(-1, dp(111)));
+        filmCardStrip.setPadding(0, dp(4), 0, dp(4));
+        filmScrollV.addView(filmCardStrip, new android.widget.FrameLayout.LayoutParams(-1, -2));
+        panel.addView(filmScrollV, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout paperRow = new LinearLayout(this);
         paperRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3618,8 +3676,10 @@ public class MainActivity extends Activity {
 
     private void rebuildFilmCards() {
         if (filmCardStrip == null) return;
-        final int keepScroll = filmScroll == null ? 0 : filmScroll.getScrollX();
+        final int keepScroll = filmScrollV != null ? filmScrollV.getScrollY()
+                : (filmScroll == null ? 0 : filmScroll.getScrollX());
         filmCardStrip.removeAllViews();
+        cardRow = null;
         filmCards.clear();
         filmCardImages.clear();
         addFilmCard("original", "原图", -1);
@@ -3631,7 +3691,8 @@ public class MainActivity extends Activity {
         updateFilmSelection();
         // Rebuilding is a deliberate act (import, brand switch): restore where
         // the user was looking rather than snapping back to the first card.
-        if (filmScroll != null) filmScroll.post(() -> filmScroll.scrollTo(keepScroll, 0));
+        if (filmScrollV != null) filmScrollV.post(() -> filmScrollV.scrollTo(0, keepScroll));
+        else if (filmScroll != null) filmScroll.post(() -> filmScroll.scrollTo(keepScroll, 0));
         try {
             DebugSink.text("film-shelf", "films=" + filmIds.size() + " cards=" + filmCards.size()
                     + " brand=" + brandFilter + " thumbs=" + filmThumbs.size());
@@ -3678,7 +3739,9 @@ public class MainActivity extends Activity {
             }
             imageBox.addView(thumb, new android.widget.FrameLayout.LayoutParams(-1, -1));
         }
-        card.addView(imageBox, new LinearLayout.LayoutParams(-1, dp(67)));
+        // PAD-UI P0: 左栏列表用整行卡片（封面 + 一行名称），高度随内容。
+        final boolean rail = filmScrollV != null;
+        card.addView(imageBox, new LinearLayout.LayoutParams(-1, dp(rail ? 76 : 67)));
 
         TextView name = label(text, 7.5f, active ? UI_BLUE : UI_INK, tfHan);
         name.setMaxLines(2);
@@ -3690,9 +3753,23 @@ public class MainActivity extends Activity {
 
         card.setClickable(true);
         card.setOnClickListener(v -> pickFilmCard(id, index));
-        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(dp(86), dp(94));
-        cardLp.rightMargin = dp(9);
-        filmCardStrip.addView(card, cardLp);
+        if (rail) {
+            // 两列网格：每行两张，行满换行。
+            if (cardRow == null || cardRow.getChildCount() >= 2) {
+                cardRow = new LinearLayout(this);
+                cardRow.setOrientation(LinearLayout.HORIZONTAL);
+                cardRow.setGravity(android.view.Gravity.TOP);
+                filmCardStrip.addView(cardRow, new LinearLayout.LayoutParams(-1, -2));
+            }
+            final LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+            lp.rightMargin = dp(6);
+            lp.bottomMargin = dp(6);
+            cardRow.addView(card, lp);
+        } else {
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(dp(86), dp(94));
+            cardLp.rightMargin = dp(9);
+            filmCardStrip.addView(card, cardLp);
+        }
         filmCards.add(card);
     }
 
@@ -3736,9 +3813,13 @@ public class MainActivity extends Activity {
             }
             if (active) target = card;
         }
-        if (scrollToCurrent && target != null && filmScroll != null) {
+        if (scrollToCurrent && target != null) {
             final View view = target;
-            filmScroll.post(() -> filmScroll.smoothScrollTo(Math.max(0, view.getLeft() - dp(8)), 0));
+            if (filmScrollV != null) {
+                filmScrollV.post(() -> filmScrollV.smoothScrollTo(0, Math.max(0, view.getTop() - dp(8))));
+            } else if (filmScroll != null) {
+                filmScroll.post(() -> filmScroll.smoothScrollTo(Math.max(0, view.getLeft() - dp(8)), 0));
+            }
         }
     }
 
@@ -7152,19 +7233,20 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setBackgroundColor(UI_PAPER);
         final String[] names = {"胶片", "冲印", "光学", "尺度", "构图", "边框"};
-        for (int i = 0; i < names.length; ++i) {
+        // PAD-UI P0: 胶片面板已在左栏常驻，页签从“冲印”开始。
+        for (int i = 1; i < names.length; ++i) {
             final int index = i;
             android.widget.FrameLayout cell = new android.widget.FrameLayout(this);
-            TextView name = label(names[i], 12, UI_MUTED, tfHan);
+            TextView name = label(names[i], 11, UI_MUTED, tfHan);
             name.setGravity(android.view.Gravity.CENTER);
             cell.addView(name, new android.widget.FrameLayout.LayoutParams(-1, -1));
             View bar = new View(this);
             bar.setBackgroundColor(UI_BLUE);
             bar.setVisibility(View.INVISIBLE);
             cell.addView(bar, new android.widget.FrameLayout.LayoutParams(
-                    dp(26), dp(3), android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL));
+                    dp(22), dp(2), android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL));
             cell.setOnClickListener(v -> onTabClicked(index));
-            tabs.addView(cell, new LinearLayout.LayoutParams(0, dp(58), 1f));
+            tabs.addView(cell, new LinearLayout.LayoutParams(0, dp(44), 1f));
             tabCells[i] = cell;
             tabBars[i] = bar;
             tabLabels[i] = name;
@@ -7175,7 +7257,7 @@ public class MainActivity extends Activity {
     private void onTabClicked(int index) {
         if (index == activeTabIndex) {
             setPanelCollapsed(!panelCollapsed);
-            showInAppToast(panelCollapsed ? "参数面板已收起，再点当前页签展开" : "参数面板已展开");
+            showInAppToast(panelCollapsed ? "参数面板已收起，点画布右侧“参数”展开" : "参数面板已展开");
         } else {
             activeTabIndex = index;
             setTab(index);
@@ -7186,20 +7268,14 @@ public class MainActivity extends Activity {
     private void setPanelCollapsed(boolean collapsed) {
         panelCollapsed = collapsed;
         if (panelHolder != null) panelHolder.setVisibility(collapsed ? View.GONE : View.VISIBLE);
+        // PAD-UI P0: 右栏整体收起/恢复，收起后由画布上的“参数”把手还原。
         if (controls != null) {
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) controls.getLayoutParams();
-            // Open is "whatever the visible panel needs"; only the collapsed
-            // row has a height of its own.
-            lp.height = collapsed ? dp(CONTROLS_CLOSED_DP) : android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
-            controls.setLayoutParams(lp);
-            // The holder's height follows the visible panel, so a tab switch
-            // has to re-measure the whole column: without this the source
-            // strip above kept its old position and the panel slid under it.
-            controls.requestLayout();
-            if (controls.getParent() instanceof android.view.View) {
-                ((android.view.View) controls.getParent()).requestLayout();
-            }
+            controls.setVisibility(collapsed ? View.GONE : View.VISIBLE);
         }
+        if (railToggle != null) {
+            railToggle.setVisibility(collapsed ? View.VISIBLE : View.GONE);
+        }
+        if (uiRoot != null) uiRoot.requestLayout();
     }
 
     // ---------------------------------------------------------------- presets
@@ -9050,8 +9126,12 @@ public class MainActivity extends Activity {
             cropOverlay.setVisibility(active == 4 && composeSubPage == 0 ? View.VISIBLE : View.GONE);
         }
         for (int i = 0; i < panels.length; ++i) {
-            panels[i].setVisibility(i == active ? View.VISIBLE : View.GONE);
-            tabBars[i].setVisibility(i == active ? View.VISIBLE : View.INVISIBLE);
+            // PAD-UI: 胶片面板常驻左栏，不参与页签切换。
+            final boolean visible = (i == 0) || (i == active);
+            panels[i].setVisibility(visible ? View.VISIBLE : View.GONE);
+            if (tabBars[i] != null) {
+                tabBars[i].setVisibility(i == active ? View.VISIBLE : View.INVISIBLE);
+            }
             if (tabLabels[i] != null) tabLabels[i].setTextColor(i == active ? UI_BLUE : UI_MUTED);
         }
     }
