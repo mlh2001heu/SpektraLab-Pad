@@ -1594,12 +1594,9 @@ public class MainActivity extends Activity {
         EdgeBackdrop(int top) { this.top = top; }
         @Override public void draw(android.graphics.Canvas canvas) {
             final android.graphics.Rect b = getBounds();
+            // PAD-UI P1: 顶栏改成纸白后，状态栏那一条也跟纸走，不再留深蓝断头。
             paint.setColor(UI_PAPER);
             canvas.drawRect(b, paint);
-            if (top > 0) {
-                paint.setColor(UI_STAGE);
-                canvas.drawRect(b.left, b.top, b.right, b.top + top, paint);
-            }
         }
         @Override public void setAlpha(int alpha) { }
         @Override public void setColorFilter(android.graphics.ColorFilter cf) { }
@@ -1696,7 +1693,7 @@ public class MainActivity extends Activity {
         cropOverlay.setVisibility(View.GONE);
         stage.addView(cropOverlay, new android.widget.FrameLayout.LayoutParams(-1, -1));
 
-        addCanvasChrome(stage);
+        addHistogram(stage);
         addPreviewFooter(stage);
 
         // Ink on white in both themes, because the disc is white in both -- the
@@ -1821,6 +1818,8 @@ public class MainActivity extends Activity {
         controls.addView(railScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
         row.addView(controls, new LinearLayout.LayoutParams(dp(304), -1));
 
+        // PAD-UI P1: 全局纸白顶栏，替代原来浮在照片上的白色 chrome。
+        app.addView(buildTopBar(), new LinearLayout.LayoutParams(-1, dp(64)));
         app.addView(row, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         // 右栏收起后，画布右缘的“参数”把手。
@@ -2425,15 +2424,72 @@ public class MainActivity extends Activity {
         top.addView(export, new LinearLayout.LayoutParams(dp(26), dp(26)));
 
         stage.addView(top, new android.widget.FrameLayout.LayoutParams(-1, dp(64), android.view.Gravity.TOP));
+    }
 
-        // **The histogram lives on the photograph, not in a panel.** It is the
-        // one readout that is about *this* frame, so it sits where the frame is
-        // and updates with it; behind it a 30% wash keeps a bright sky from
-        // swallowing the traces.
-        // **Whether the histogram shows is a preference now.** It is the one
-        // readout that is about *this* frame, so it sits on the frame; but a
-        // plate over the top-left corner of a photograph is not always
-        // wanted, and the switch is in 光学 -> 亮度.
+    /**
+     * PAD-UI P1: 全局顶栏（纸白，横跨三栏）。
+     *
+     * <p>原来的品牌/菜单/撤销/分享/导出是浮在照片上的（白字 + 渐变），
+     * 现在提成一条真正的高度 64dp 的栏，颜色按纸面主题走，图标统一染色。
+     */
+    private LinearLayout buildTopBar() {
+        final LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bar.setBackgroundColor(UI_PAPER);
+        bar.setPadding(dp(16), 0, dp(16), 0);
+
+        final android.widget.ImageView menu = new android.widget.ImageView(this);
+        menu.setImageResource(getResources().getIdentifier("ic_menu_white", "drawable", getPackageName()));
+        menu.setColorFilter(UI_INK);
+        menu.setContentDescription("设置");
+        menu.setOnClickListener(v -> showAbout());
+        bar.addView(menu, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+        final TextView word = label("SpektraLab", 17, UI_INK, tfDisplay);
+        word.setLetterSpacing(-0.045f);
+        word.setSingleLine(true);
+        final LinearLayout.LayoutParams wordLp = new LinearLayout.LayoutParams(-2, -2);
+        wordLp.leftMargin = dp(10);
+        bar.addView(word, wordLp);
+
+        final TextView version = label("v" + UpdateCheck.versionName(this), 8, UI_MUTED, tfBody);
+        final LinearLayout.LayoutParams verLp = new LinearLayout.LayoutParams(-2, -2);
+        verLp.leftMargin = dp(6);
+        bar.addView(version, verLp);
+
+        bar.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+
+        undoPill = new android.widget.ImageView(this);
+        undoPill.setImageResource(getResources().getIdentifier("ic_undo_white", "drawable", getPackageName()));
+        undoPill.setColorFilter(UI_INK);
+        undoPill.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
+        undoPill.setVisibility(View.GONE);
+        undoPill.setOnClickListener(v -> undoStep());
+        final LinearLayout.LayoutParams undoLp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        undoLp.rightMargin = dp(14);
+        bar.addView(undoPill, undoLp);
+
+        sharePill = label("分享", 10, UI_BLUE, tfHan);
+        sharePill.setGravity(android.view.Gravity.CENTER);
+        sharePill.setVisibility(View.GONE);
+        sharePill.setPadding(dp(8), 0, dp(8), 0);
+        sharePill.setOnClickListener(v -> shareLastExport());
+        final LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(-2, dp(30));
+        shareLp.rightMargin = dp(10);
+        bar.addView(sharePill, shareLp);
+
+        final android.widget.ImageView export = new android.widget.ImageView(this);
+        export.setImageResource(getResources().getIdentifier("ic_export_white", "drawable", getPackageName()));
+        export.setColorFilter(UI_INK);
+        export.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
+        export.setOnClickListener(v -> showExportDialog());
+        bar.addView(export, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        return bar;
+    }
+
+    /** 直方图挂在画布上，与顶栏无关。 */
+    private void addHistogram(android.widget.FrameLayout stage) {
         histogramOn = getSharedPreferences("ui", MODE_PRIVATE).getBoolean("histogram", true);
         rawAutoBright = getSharedPreferences("ui", MODE_PRIVATE)
                 .getBoolean("raw_auto_bright", false);
