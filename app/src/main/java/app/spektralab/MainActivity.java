@@ -632,6 +632,8 @@ public class MainActivity extends Activity {
     private android.widget.ScrollView filmScrollV;
     /** PAD-UI: 左栏两列网格的当前行；换行时新建一行。 */
     private LinearLayout cardRow;
+    /** PAD-UI: 右栏常驻滑杆的取值刷新器（胶片/预设变化后同步）。 */
+    private final java.util.List<Runnable> padSliderSync = new java.util.ArrayList<>();
     /**
      * One photograph this session has opened, kept so the strip under the
      * canvas can bring it back without a trip through the picker.
@@ -1814,6 +1816,7 @@ public class MainActivity extends Activity {
         railScroll.setVerticalScrollBarEnabled(false);
         railScroll.addView(panelHolder, new android.widget.FrameLayout.LayoutParams(-1, -2));
 
+        controls.addView(buildAdjustBlock(), new LinearLayout.LayoutParams(-1, -2));
         controls.addView(buildTabs(), new LinearLayout.LayoutParams(-1, dp(44)));
         controls.addView(railScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
         row.addView(controls, new LinearLayout.LayoutParams(dp(304), -1));
@@ -2488,9 +2491,72 @@ public class MainActivity extends Activity {
         return bar;
     }
 
+    /**
+     * PAD-UI P1: 右栏常驻的“调整”区（曝光 / 颗粒 / 光晕 / 眩光）。
+     *
+     * <p>这几个是出片时最常动的量，原来藏在“光学”页的旋钮条后面，
+     * 每次都要先切页再找滑块。这里直接绑同一批字段与同一套渲染路径，
+     * 旋钮仍然可用（那里还有另外十八个参数）。
+     */
+    private LinearLayout buildAdjustBlock() {
+        final LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(6), dp(14), dp(4));
+        box.addView(label("调整", 11, UI_INK, tfHan), new LinearLayout.LayoutParams(-1, dp(24)));
+        padSlider(box, "曝光", 0.25f, 4.0f, v -> printExposure = v, () -> printExposure);
+        padSlider(box, "颗粒", 0.0f, 2.0f, v -> grainAmount = v, () -> grainAmount);
+        padSlider(box, "光晕", 0.0f, 4.0f, v -> halationAmount = v, () -> halationAmount);
+        padSlider(box, "眩光", 0.0f, 12.0f, v -> glareAmount = v, () -> glareAmount);
+        return box;
+    }
+
+    /** 一条紧凑滑杆：11dp 标签 + 数值 + 28dp 轨道，命中区是整行。 */
+    private void padSlider(LinearLayout parent, String name, float lo, float hi,
+                           java.util.function.Consumer<Float> set,
+                           java.util.function.Supplier<Float> get) {
+        final LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        final LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        final TextView lab = label(name, 9.5f, UI_MUTED, tfHan);
+        final TextView val = label("", 9.5f, UI_INK, tfBody);
+        head.addView(lab, new LinearLayout.LayoutParams(0, -2, 1f));
+        head.addView(val);
+        row.addView(head, new LinearLayout.LayoutParams(-1, dp(16)));
+
+        final ScrubBar bar = new ScrubBar(this);
+        bar.setMax(1000);
+        styleRange(bar);
+        final Runnable sync = () -> {
+            final float v = get.get();
+            bar.setProgress(Math.round((v - lo) / (hi - lo) * 1000f));
+            val.setText(String.format(java.util.Locale.US, "%.2f", v));
+        };
+        sync.run();
+        padSliderSync.add(sync);
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                final float v = lo + (hi - lo) * progress / 1000f;
+                set.accept(v);
+                if (fromUser) val.setText(String.format(java.util.Locale.US, "%.2f", v));
+                if (bar.isDragging()) requestLivePreview();
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) { }
+            @Override public void onStopTrackingTouch(SeekBar sb) {
+                if (uiReady && session != null) {
+                    showingOriginal = false;
+                    setOriginalVisual(false);
+                    renderImage();
+                }
+            }
+        });
+        row.addView(bar, new LinearLayout.LayoutParams(-1, dp(32)));
+        parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
+    }
+
     /** 直方图挂在画布上，与顶栏无关。 */
-    private void addHistogram(android.widget.FrameLayout stage) {
-        histogramOn = getSharedPreferences("ui", MODE_PRIVATE).getBoolean("histogram", true);
+    private void addHistogram(android.widget.FrameLayout stage) {        histogramOn = getSharedPreferences("ui", MODE_PRIVATE).getBoolean("histogram", true);
         rawAutoBright = getSharedPreferences("ui", MODE_PRIVATE)
                 .getBoolean("raw_auto_bright", false);
         histogram = new HistogramView(this);
@@ -9262,6 +9328,10 @@ public class MainActivity extends Activity {
     private void refreshPanelLocks() {
         refreshViewLock();
         setOpticsUnlocked(panelsLive());
+        // PAD-UI: 胶片/预设变化后，右栏常驻滑杆的数值跟着刷新。
+        for (Runnable r : padSliderSync) {
+            if (r != null) r.run();
+        }
     }
 
     private void setOpticsUnlocked(boolean unlocked) {
