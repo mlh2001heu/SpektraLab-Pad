@@ -634,6 +634,12 @@ public class MainActivity extends Activity {
     private LinearLayout cardRow;
     /** PAD-UI: 右栏常驻滑杆的取值刷新器（胶片/预设变化后同步）。 */
     private final java.util.List<Runnable> padSliderSync = new java.util.ArrayList<>();
+    /** PAD-UI: 左栏“胶片 / 相纸”分段与相纸列表。 */
+    private TextView filmSeg, paperSeg;
+    private android.widget.ScrollView paperScroll;
+    private LinearLayout paperStrip, meterRowRef;
+    private android.view.View brandScrollRef;
+    private boolean leftPaperMode = false;
     /**
      * One photograph this session has opened, kept so the strip under the
      * canvas can bring it back without a trip through the picker.
@@ -3383,6 +3389,22 @@ public class MainActivity extends Activity {
         // 改成两行：标题 + 重置；测光单独一行。
         final LinearLayout titleRow = sectionHead("FILM & PAPER / 胶片与相纸", this::resetFilmPanel);
         filmHead.addView(titleRow, new LinearLayout.LayoutParams(-1, dp(30)));
+        // PAD-UI P1: “胶片 / 相纸”分段，替代原来藏在底部的相纸一行。
+        final LinearLayout segRow = new LinearLayout(this);
+        segRow.setOrientation(LinearLayout.HORIZONTAL);
+        segRow.setBackgroundColor(UI_GROUND);
+        filmSeg = label("胶片", 9.5f, UI_BLUE, tfHan);
+        paperSeg = label("相纸", 9.5f, UI_MUTED, tfHan);
+        filmSeg.setGravity(android.view.Gravity.CENTER);
+        paperSeg.setGravity(android.view.Gravity.CENTER);
+        filmSeg.setOnClickListener(v -> setLeftMode(false));
+        paperSeg.setOnClickListener(v -> setLeftMode(true));
+        segRow.addView(filmSeg, new LinearLayout.LayoutParams(0, dp(28), 1f));
+        segRow.addView(paperSeg, new LinearLayout.LayoutParams(0, dp(28), 1f));
+        final LinearLayout.LayoutParams segLp = new LinearLayout.LayoutParams(-1, dp(30));
+        segLp.topMargin = dp(2);
+        segLp.bottomMargin = dp(2);
+        filmHead.addView(segRow, segLp);
         final LinearLayout meterRow = new LinearLayout(this);
         meterRow.setOrientation(LinearLayout.HORIZONTAL);
         meterRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -3407,7 +3429,7 @@ public class MainActivity extends Activity {
         meterRow.addView(meterChip, chipLp);
         filmHead.addView(meterRow, new LinearLayout.LayoutParams(-1, dp(32)));
         refreshMeterChip();
-        panel.addView(filmHead, new LinearLayout.LayoutParams(-1, dp(64)));
+        panel.addView(filmHead, new LinearLayout.LayoutParams(-1, dp(96)));
 
         HorizontalScrollView brandScroll = new HorizontalScrollView(this);
         brandScroll.setHorizontalScrollBarEnabled(false);
@@ -3430,6 +3452,20 @@ public class MainActivity extends Activity {
         filmCardStrip.setPadding(0, dp(4), 0, dp(4));
         filmScrollV.addView(filmCardStrip, new android.widget.FrameLayout.LayoutParams(-1, -2));
         panel.addView(filmScrollV, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        // PAD-UI P1: 相纸列表（与胶片网格共用同一块区域，分段切换）。
+        paperScroll = new android.widget.ScrollView(this);
+        paperScroll.setVerticalScrollBarEnabled(false);
+        paperScroll.setFillViewport(true);
+        paperStrip = new LinearLayout(this);
+        paperStrip.setOrientation(LinearLayout.VERTICAL);
+        paperStrip.setPadding(0, dp(4), 0, dp(4));
+        paperScroll.addView(paperStrip, new android.widget.FrameLayout.LayoutParams(-1, -2));
+        paperScroll.setVisibility(View.GONE);
+        panel.addView(paperScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        brandScrollRef = brandScroll;
+        meterRowRef = meterRow;
 
         LinearLayout paperRow = new LinearLayout(this);
         paperRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3989,12 +4025,69 @@ public class MainActivity extends Activity {
         if (isPositiveStock(filmStock)) {
             paperValue.setText("无相纸 · 直接扫描");
             paperValue.setTextColor(UI_MUTED);
+            if (leftPaperMode) rebuildPaperList();
             return;
         }
         paperValue.setTextColor(UI_INK);
         int i = printIds.indexOf(printStock);
         paperValue.setText(i >= 0 && i < printLabels.size()
                 ? shortStockName(printLabels.get(i)) : printStock);
+        if (leftPaperMode) rebuildPaperList();
+    }
+
+    /** PAD-UI P1: 左栏在“胶片网格”和“相纸列表”之间切换。 */
+    private void setLeftMode(boolean paper) {
+        leftPaperMode = paper;
+        if (brandScrollRef != null) brandScrollRef.setVisibility(paper ? View.GONE : View.VISIBLE);
+        if (meterRowRef != null) meterRowRef.setVisibility(paper ? View.GONE : View.VISIBLE);
+        if (filmScrollV != null) filmScrollV.setVisibility(paper ? View.GONE : View.VISIBLE);
+        if (paperScroll != null) paperScroll.setVisibility(paper ? View.VISIBLE : View.GONE);
+        if (filmSeg != null) filmSeg.setTextColor(paper ? UI_MUTED : UI_BLUE);
+        if (paperSeg != null) paperSeg.setTextColor(paper ? UI_BLUE : UI_MUTED);
+        if (paper) rebuildPaperList();
+    }
+
+    /** 九款相纸：名称 + 这一款在引擎里的倾向 + 选中态。 */
+    private void rebuildPaperList() {
+        if (paperStrip == null) return;
+        paperStrip.removeAllViews();
+        final boolean positive = isPositiveStock(filmStock);
+        if (positive) {
+            final TextView note = label("反转片直接扫描，不需要相纸；换一支负片再选。", 8, UI_MUTED, tfHan);
+            note.setPadding(0, dp(2), 0, dp(8));
+            note.setMaxLines(2);
+            paperStrip.addView(note, new LinearLayout.LayoutParams(-1, -2));
+        }
+        for (int i = 0; i < printIds.size(); ++i) {
+            final String id = printIds.get(i);
+            final boolean active = id.equals(printStock) && !positive;
+            final LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(dp(10), dp(7), dp(10), dp(7));
+            row.setBackground(cardBorder(active));
+            if (positive) row.setAlpha(0.45f);
+            row.addView(label(printLabels.get(i), 9.5f, active ? UI_BLUE : UI_INK, tfHan),
+                    new LinearLayout.LayoutParams(-1, dp(19)));
+            final String note = paperNote(id);
+            if (note != null) {
+                row.addView(label(note, 7.5f, active ? UI_BLUE : UI_MUTED, tfHan),
+                        new LinearLayout.LayoutParams(-1, dp(15)));
+            }
+            row.setOnClickListener(v -> {
+                if (positive) {
+                    showInAppToast("反转片直接扫描，没有相纸这一步");
+                    return;
+                }
+                if (id.equals(printStock)) return;
+                printStock = id;
+                showingOriginal = false;
+                refreshPaperLabel();
+                onStockChanged();
+            });
+            final LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(6);
+            paperStrip.addView(row, lp);
+        }
     }
 
     private void showPaperPicker() {
