@@ -13,3 +13,4 @@ debug.keystore
 
 # ~30 MB of binary resources are not distributed with the source
 app/src/main/assets/
+.pad-build/
