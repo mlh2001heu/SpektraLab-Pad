@@ -394,6 +394,8 @@ public class MainActivity extends Activity {
     private static int UI_MUTED      = 0xFF777772;   // secondary text
     private static int UI_LINE       = 0xFFCECEC8;   // strokes
     private static int UI_STAGE      = 0xFF172174;   // the canvas
+    /** PAD-UI: 画布底色（照片不再压在蓝底上）。 */
+    private static int UI_CANVAS     = 0xFFE9E7E2;
     /**
      * Ink for anything that sits on a white disc.
      *
@@ -424,7 +426,7 @@ public class MainActivity extends Activity {
      * the canvas turned black. On the canvas the contrast colour is what is
      * wanted, and it is white in both themes.
      */
-    private static int uiOnCanvas() { return 0xFFF1F1EE; }
+    private static int uiOnCanvas() { return darkTheme ? 0xFFF1F1EE : UI_INK; }
     /** True when the dark palette is in force; the canvas chrome asks. */
     private static boolean darkTheme = false;
 
@@ -445,6 +447,7 @@ public class MainActivity extends Activity {
             UI_MUTED      = 0xFF9A948A;
             UI_LINE       = 0xFF3A352F;
             UI_STAGE      = 0xFF000000;   // **the canvas is black**
+            UI_CANVAS     = 0xFF000000;
         } else {
             UI_BLUE       = 0xFF1C2AA5;
             UI_BLUE_LIGHT = 0xFF3B4BC0;
@@ -454,6 +457,7 @@ public class MainActivity extends Activity {
             UI_MUTED      = 0xFF777772;
             UI_LINE       = 0xFFCECEC8;
             UI_STAGE      = 0xFF172174;
+            UI_CANVAS     = 0xFFE9E7E2;
         }
     }
 
@@ -1472,7 +1476,7 @@ public class MainActivity extends Activity {
     private void lightSystemBars() {
         try {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            getWindow().setStatusBarColor(UI_STAGE);
+            getWindow().setStatusBarColor(UI_PAPER);
             getWindow().setNavigationBarColor(UI_PAPER);
             if (android.os.Build.VERSION.SDK_INT >= 30) {
                 // **`Window.getInsetsController()` dereferences `mDecor`.** On
@@ -1484,18 +1488,23 @@ public class MainActivity extends Activity {
                 final android.view.WindowInsetsController c =
                         decor == null ? null : decor.getWindowInsetsController();
                 if (c != null) {
-                    // The canvas is behind the status bar, so its glyphs are white in
-                    // both themes; the navigation bar sits on the panel, so its
-                    // glyphs follow the panel's lightness.
+                    // PAD-UI: 顶栏改成纸白后，状态栏也在纸面上，图标要转为深色；
+                    // 深色主题下仍是浅色图标。
                     int on = 0;
-                    if (!darkTheme) on |= android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                    int off = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
-                    c.setSystemBarsAppearance(on, on | off);
+                    if (!darkTheme) {
+                        on |= android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                                | android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                    }
+                    final int mask =
+                            android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                                    | android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                    c.setSystemBarsAppearance(on, mask);
                 }
             } else {
                 int flags = 0;
                 if (!darkTheme && android.os.Build.VERSION.SDK_INT >= 26) {
-                    flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                    flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                            | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
                 }
                 getWindow().getDecorView().setSystemUiVisibility(flags);
             }
@@ -1630,7 +1639,7 @@ public class MainActivity extends Activity {
         // source strip sits below it, and the tool panels sit below that.
         final android.widget.FrameLayout stage = new android.widget.FrameLayout(this);
         canvasStage = stage;
-        stage.setBackgroundColor(UI_STAGE);
+        stage.setBackgroundColor(UI_CANVAS);
         stage.setClipChildren(false);
 
         compare = new CompareView(this);
@@ -1693,7 +1702,7 @@ public class MainActivity extends Activity {
         // At 90% opacity it covered the whole canvas, which is why the dark
         // theme still looked navy while everything else had gone black. It is
         // now the canvas colour itself, so it is invisible in both themes.
-        busyLabel.setBackgroundColor(0xE6000000 | (UI_STAGE & 0x00FFFFFF));
+        busyLabel.setBackgroundColor(0xE6000000 | (UI_CANVAS & 0x00FFFFFF));
         busyLabel.setVisibility(View.GONE);
         stage.addView(busyLabel, new android.widget.FrameLayout.LayoutParams(-1, -1));
 
@@ -1791,7 +1800,7 @@ public class MainActivity extends Activity {
 
         final LinearLayout center = new LinearLayout(this);
         center.setOrientation(LinearLayout.VERTICAL);
-        center.setBackgroundColor(UI_STAGE);
+        center.setBackgroundColor(UI_CANVAS);
         center.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
         center.addView(buildSourceBar(), new LinearLayout.LayoutParams(-1, dp(62)));
         row.addView(center, new LinearLayout.LayoutParams(0, -1, 1f));
